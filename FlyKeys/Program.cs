@@ -1,28 +1,56 @@
 ﻿using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Threading.Tasks;
 
 namespace FlyKeys
 {
     internal static class Program
     {
+        private static readonly string[] FlyCodes =
+        {
+            "fh",
+            "qh",
+            "fz",
+            "qz",
+            "fe",
+            "qe",
+            "jz",
+            "wz",
+            "je",
+            "we",
+            "gx",
+            "gm",
+            "kx",
+            "km",
+            "hx",
+            "hm",
+            "fx",
+            "fm",
+            "wx",
+            "wm",
+            "ex",
+            "em"
+        };
+
         internal static void Main()
         {
             try
             {
-                var path = GetPath();
-                var entries = ReadEntries(path);
-                Console.WriteLine($"共读取{entries.Length}个词条。查找遗漏的飞键中...");
-                var omitted = FindOmitted(entries);
+                var dictPath = GetPath("Rime键道6词库");
+                var entries = ReadEntries(dictPath);
+                Console.WriteLine($"共读取{entries.Length}个词条。");
+
+                var danPath = GetPath("Rime键道6单字词库");
+                var flyChars = ReadDans(danPath);
+                Console.WriteLine($"共读取{flyChars.Length}个需要飞键的单字。查找遗漏的飞键中...");
+
+                var omitted = FindOmitted(entries, flyChars);
                 if (omitted.Length == 0)
                     Console.WriteLine("没有找到任何遗漏的飞键。");
                 else
                 {
                     Console.WriteLine($"共找到{omitted.Length}个遗漏的飞键。输出中...");
-                    var outputPath = DistinctName(path);
+                    var outputPath = DistinctName(dictPath);
                     if (!WriteFile(outputPath, omitted)) WriteScreen(omitted);
                 }
             }
@@ -30,9 +58,9 @@ namespace FlyKeys
             finally { _ = Console.ReadKey(); }
         }
 
-        private static string GetPath()
+        private static string GetPath(string prompt)
         {
-            Console.WriteLine("输入rime词库文件路径：");
+            Console.WriteLine($"输入{prompt}文件路径：");
             var path = Console.ReadLine();
             while (!File.Exists(path))
             {
@@ -58,48 +86,44 @@ namespace FlyKeys
                     })
                 .ToArray();
 
-        private static string[] FindOmitted((string word, string code)[] entries)
-        {
-            var omitted = new ConcurrentBag<string>();
-            var checkedWords = new ConcurrentBag<string>();
-            var flyKeys = new Dictionary<string, string>();
+        private static string[] ReadDans(string path) =>
+            File.ReadAllLines(path)
+                .AsParallel()
+                .Where(
+                    line => (line.Contains("#")
+                          && line.Substring(0, line.IndexOf('#')).Split('\t').Length >= 2
+                          && line.Substring(0, line.IndexOf('#')).Split('\t')[1].Length >= 2
+                          && FlyCodes.Contains(line.Substring(0, line.IndexOf('#')).Split('\t')[1].Substring(0, 2)))
+                         || (!line.Contains("#")
+                          && line.Split('\t').Length >= 2
+                          && line.Split('\t')[1].Length >= 2
+                          && FlyCodes.Contains(line.Split('\t')[1].Substring(0, 2))))
+                .Select(
+                    line =>
+                    {
+                        var parts = line.Contains("#")
+                            ? line.Substring(0, line.IndexOf('#')).Split('\t')
+                            : line.Split('\t');
+                        return parts[0];
+                    })
+                .Distinct()
+                .ToArray();
 
-            AddFlyKey("fh", "qh");
-            AddFlyKey("fz", "qz");
-            AddFlyKey("fe", "qe");
-            AddFlyKey("jz", "wz");
-            AddFlyKey("je", "we");
-            AddFlyKey("gx", "gm");
-            AddFlyKey("kx", "km");
-            AddFlyKey("hx", "hm");
-            AddFlyKey("fx", "fm");
-            AddFlyKey("wx", "wm");
-            AddFlyKey("ex", "em");
-
-            Parallel.ForEach(
-                entries, entry =>
-                {
-                    if (checkedWords.Contains(entry.word)) return;
-                    checkedWords.Add(entry.word);
-                    if (flyKeys.TryGetValue(entry.code.Substring(0, 2), out var value)
-                     && !entries.Any(e => e.word == entry.word && e.code.StartsWith(value)))
-                        omitted.Add($"{entry.word}\t{entry.code}\t{value}");
-                });
-            return omitted.ToArray();
-
-            void AddFlyKey(string code1, string code2)
-            {
-                flyKeys.Add(code1, code2);
-                flyKeys.Add(code2, code1);
-            }
-        }
+        private static string[] FindOmitted((string word, string code)[] entries, string[] flyChars) =>
+            entries.AsParallel()
+                .Where(
+                    entry => entry.word.Any(c => flyChars.Contains(c.ToString()))
+                          && entries.Count(e => e.word == entry.word) == 1)
+                .Select(entry => $"{entry.word}\t{entry.code}")
+                .OrderBy(s => s)
+                .ToArray();
 
         private static string DistinctName(string path)
         {
             var dir = Path.GetDirectoryName(path) ?? throw new InvalidOperationException("无法获取上级目录");
             var name = Path.GetFileNameWithoutExtension(path);
-            var outputPath = Path.Combine(dir, $"{name}_空码.txt");
-            for (var i = 2; File.Exists(outputPath); i++) outputPath = Path.Combine(dir, $"{name}_空码_{i}.txt");
+            var outputPath = Path.Combine(dir, $"{name}_遗漏飞键.txt");
+            for (var i = 2; File.Exists(outputPath); i++) outputPath = Path.Combine(dir, $"{name}_遗漏飞键_{i}.txt");
             return outputPath;
         }
 
@@ -121,7 +145,7 @@ namespace FlyKeys
 
         private static void WriteScreen(string[] vacancies)
         {
-            Console.WriteLine("词组\t编码\t遗漏的飞键");
+            Console.WriteLine("词组\t编码");
             foreach (var vacancy in vacancies) Console.WriteLine(vacancy);
         }
     }

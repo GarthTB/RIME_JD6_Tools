@@ -31,7 +31,7 @@ namespace Vacancy
 
         private static string GetPath()
         {
-            Console.WriteLine("输入rime词库文件路径：");
+            Console.WriteLine("输入Rime键道6词库文件路径：");
             var path = Console.ReadLine();
             while (!File.Exists(path))
             {
